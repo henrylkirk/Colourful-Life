@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Colorful Life Simulation</title>
+  <style>
+  canvas { display: block; margin: 0 auto; background-color: #000; }
+  </style>
+</head>
+<body>
+  <canvas id="gameCanvas"></canvas>
+  <script>
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+  canvas.width = 800;
+  canvas.height = 800;
+  const cellSize = 8;
+  const rows = canvas.height / cellSize;
+  const cols = canvas.width / cellSize;
+  const colors = ['red', 'green', 'blue', 'yellow', 'magenta', 'cyan', 'white', 'orange', 'purple', 'darkblue'];
+  const reservedColors = {
+    flood: 'rgba(0, 0, 255, 0.5)',
+    drought: 'rgba(210, 180, 140, 0.5)',
+    heatwave: 'rgba(255, 140, 0, 0.5)',
+    coldwave: 'rgba(135, 206, 235, 0.5)',
+  };
+
+  const chanceToMutate = 0.01;
+  const maxAge = 10;
+  const geneMutationRange = 0.1;
+  let eventCounter = 0;
+  let currentEvent = generateRandomEvent(); // Initialize with an event;
+
+  class Cell {
+    constructor(row, col, color, sight, initPreferences, initGenes) {
+      this.row = row;
+      this.col = col;
+      this.color = color;
+      this.age = 0;
+      this.sight = sight;
+      this.preferences = initPreferences;
+      this.hunger = 0;
+      this.genes = initGenes;
+    }
+
+    static inheritPreferences(parentA, parentB) {
+      const preferences = parentA.preferences.map((prefA, index) => {
+        const prefB = parentB.preferences[index];
+        return (prefA + prefB) / 2 + (Math.random() * 0.1 - 0.05); // Inherit preferences with a slight mutation
+      });
+
+      return preferences;
+    }
+
+    static inheritGenes(parentA, parentB) {
+      const newGenes = parentA.genes.map((geneA, index) => {
+        const geneB = parentB.genes[index];
+        return (geneA + geneB) / 2 + (Math.random() * geneMutationRange - geneMutationRange / 2);
+      });
+      return newGenes;
+    }
+  }
+
+  function generateRandomEvent() {
+    const eventTypes = ['flood', 'drought', 'heatwave', 'coldwave'];
+    const eventType = eventTypes[Math.floor(Math.random() * eventTypes.length)];
+    const duration = Math.floor(Math.random() * 500) + 100; // Event duration between 100 and 600 frames
+    const strength = Math.random(); // Event strength between 0 and 1
+    const affectedArea = {
+      x: Math.floor(Math.random() * cols),
+      y: Math.floor(Math.random() * rows),
+      width: Math.floor(Math.random() * (cols / 4)) + 1,
+      height: Math.floor(Math.random() * (rows / 4)) + 1,
+    };
+    return { eventType, duration, affectedArea, strength };
+  }
+
+  function manageHunger(cell, highDensity) {
+    cell.hunger += highDensity ? 0.02 : 0.01;
+    if (cell.hunger >= 1) {
+      return true; // Starved to death
+    }
+    return false; // Still alive
+  }
+
+  const grid = new Array(rows).fill(null).map(() => new Array(cols).fill(null));
+
+  function initGrid() {
+    for (let row = 0; row < rows; row++) {
+      for (let col = 0; col < cols; col++) {
+        if (Math.random() < 0.05) {
+          const genes = Array.from({ length: 5 }, () => Math.random()); // Initialize random genes
+          const preferences = colors.map(() => Math.random());
+          grid[row][col] = new Cell(row, col, colors[Math.floor(Math.random() * colors.length)], Math.floor(Math.random() * 5) + 1, preferences, genes);
+        }
+      }
+    }
+  }
+
+  function drawGrid() {
+    for (let row = 0; row < rows; row++) {
+      for (let col = 0; col < cols; col++) {
+        if (grid[row][col]) {
+          ctx.fillStyle = grid[row][col].color;
+          ctx.fillRect(col * cellSize, row * cellSize, cellSize, cellSize);
+        } else {
+          ctx.clearRect(col * cellSize, row * cellSize, cellSize, cellSize);
+        }
+      }
+    }
+
+    // Draw the event area
+    if (currentEvent) {
+      ctx.fillStyle = reservedColors[currentEvent.eventType];
+      ctx.fillRect(
+        currentEvent.affectedArea.x * cellSize,
+        currentEvent.affectedArea.y * cellSize,
+        currentEvent.affectedArea.width * cellSize,
+        currentEvent.affectedArea.height * cellSize,
+      );
+    }
+  }
+
+
+  function countNeighbors(row, col) {
+    const neighbors = {};
+
+    for (let x = -1; x <= 1; x++) {
+      for (let y = -1; y <= 1; y++) {
+        if (x === 0 && y === 0) continue;
+        const newRow = (row + y + rows) % rows;
+        const newCol = (col + x + cols) % cols;
+        const color = grid[newRow][newCol]?.color;
+        if (color) {
+          neighbors[color] = (neighbors[color] || 0) + 1;
+        }
+      }
+    }
+
+    return neighbors;
+
+  }
+
+  function findBestMate(cell, potentialMates) {
+    let bestMate = null;
+    let highestPreference = -Infinity;
+
+    potentialMates.forEach(mate => {
+      const preference = cell.preferences[colors.indexOf(mate.target.color)];
+      if (preference > highestPreference) {
+        highestPreference = preference;
+        bestMate = mate;
+      }
+    });
+
+    return bestMate;
+  }
+
+
+  function findTargets(row, col, cell, highDensity) {
+    const mates = [];
+    const enemies = [];
+    const society = [];
+
+    for (let x = -cell.sight; x <= cell.sight; x++) {
+      for (let y = -cell.sight; y <= cell.sight; y++) {
+        if (x === 0 && y === 0) continue;
+        const newRow = (row + y + rows) % rows;
+        const newCol = (col + x + cols) % cols;
+        const target = grid[newRow][newCol];
+        if (target) {
+          if (target.color === cell.color) {
+            society.push({ row: newRow, col: newCol, target });
+          } else {
+            const targetPreference = cell.preferences[colors.indexOf(target.color)];
+            if (highDensity || targetPreference <= 0.5) {
+              enemies.push({ row: newRow, col: newCol, target });
+            } else {
+              mates.push({ row: newRow, col: newCol, target });
+            }
+          }
+        }
+      }
+    }
+
+    return { mates, enemies, society };
+  }
+
+  function moveToTarget(row, col, targetRow, targetCol) {
+    const newRow = row + Math.sign(targetRow - row);
+    const newCol = col + Math.sign(targetCol - col);
+    const nextRow = (newRow + rows) % rows;
+    const nextCol = (newCol + cols) % cols;
+
+    if (!grid[nextRow][nextCol]) {
+      grid[nextRow][nextCol] = grid[row][col];
+      grid[row][col] = null;
+    }
+  }
+
+  function moveRandomly(row, col, cell) {
+    const newRow = (row + Math.floor(Math.random() * 3) - 1 + rows) % rows;
+    const newCol = (col + Math.floor(Math.random() * 3) - 1 + cols) % cols;
+
+    if (!grid[newRow][newCol]) {
+      grid[newRow][newCol] = cell;
+      grid[row][col] = null;
+    }
+  }
+
+  function calculatePopulationDensity() {
+    let population = 0;
+    for (let row = 0; row < rows; row++) {
+      for (let col = 0; col < cols; col++) {
+        if (grid[row][col]) {
+          population++;
+        }
+      }
+    }
+    return population / (rows * cols);
+  }
+
+  function applyEventEffects(cell, row, col, currentEvent) {
+    if (
+      currentEvent &&
+      row >= currentEvent.affectedArea.y &&
+      row < currentEvent.affectedArea.y + currentEvent.affectedArea.height &&
+      col >= currentEvent.affectedArea.x &&
+      col < currentEvent.affectedArea.x + currentEvent.affectedArea.width
+    ) {
+      switch (currentEvent.eventType) {
+        case 'flood':
+        // Apply flood effects, e.g., remove certain organisms or reduce their energy
+        break;
+        case 'drought':
+        // Apply drought effects, e.g., increase hunger, reduce energy
+        break;
+        case 'heatwave':
+        // Apply heatwave effects, e.g., remove certain organisms or increase their hunger
+        break;
+        case 'coldwave':
+        // Apply coldwave effects, e.g., reduce energy or movement speed
+        break;
+      }
+    }
+  }
+
+  function breed(parentA, parentB) {
+    const row = parentA.row;
+    const col = parentA.col;
+
+    // Inherit the color from both parents with a slight chance of mutation
+    let newColor = Math.random() < 0.5 ? parentA.color : parentB.color;
+    if (Math.random() < chanceToMutate) {
+      const availableColors = colors.filter(color => color !== newColor);
+      newColor = availableColors[Math.floor(Math.random() * availableColors.length)];
+    }
+
+    const offspringPreferences = Cell.inheritPreferences(parentA, parentB);
+    const newGenes = Cell.inheritGenes(parentA, parentB);
+
+    const offspring = new Cell(row, col, newColor, parentA.sight, offspringPreferences, newGenes);
+
+    return offspring;
+  }
+
+  function updateGrid() {
+    const populationDensity = calculatePopulationDensity();
+    const highDensity = populationDensity > 0.2; // Adjust the threshold for high density as needed
+
+    if (eventCounter % 2000 === 0) {
+      currentEvent = generateRandomEvent();
+    }
+
+    if (currentEvent && eventCounter % (2000 + currentEvent.duration) === 0) {
+      currentEvent = generateRandomEvent();
+    }
+
+    eventCounter++;
+
+    for (let row = 0; row < rows; row++) {
+      for (let col = 0; col < cols; col++) {
+        const cell = grid[row][col];
+
+        if (cell) {
+          applyEventEffects(cell, row, col, currentEvent);
+
+          if (manageHunger(cell, highDensity)) {
+            grid[row][col] = null; // Remove the cell if it starved to death
+            continue;
+          }
+
+          const starving = cell.hunger > 0.7;
+
+          if (starving) {
+            cell.sight = Math.max(1, cell.sight - 1); // Decrease sight if starving
+          }
+
+          const { mates, enemies, society } = findTargets(row, col, cell, highDensity);
+
+          if (mates.length > 0) {
+            const bestMate = findBestMate(cell, mates);
+            if (bestMate) {
+              moveToTarget(row, col, bestMate.row, bestMate.col);
+
+              if (Math.random() < 0.1) {
+                const offspring = breed(cell, bestMate.target);
+                grid[row][col] = offspring;
+              }
+            }
+          } else if (enemies.length > 0) {
+            const enemyToAvoid = enemies[Math.floor(Math.random() * enemies.length)];
+            moveToTarget(row, col, enemyToAvoid.row, enemyToAvoid.col);
+          } else {
+            moveRandomly(row, col, cell);
+          }
+        }
+      }
+    }
+  }
+
+  function update() {
+    updateGrid();
+    drawGrid();
+    requestAnimationFrame(update);
+  }
+
+  initGrid();
+  drawGrid();
+  requestAnimationFrame(update);
+  </script>
+
+  </body>
+  </html>
