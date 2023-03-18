@@ -51,13 +51,11 @@
             constructor(row, col, genes) {
                 this.row = row;
                 this.col = col;
+                this.colour = colors[genes.colorIndex];
                 this.genes = genes;
                 this.hunger = 0;
                 this.currentSight = this.genes.sight;
-            }
-
-            get color() {
-                return this.genes.color;
+                this.society = [];
             }
 
             move() {
@@ -75,55 +73,46 @@
                 }
             }
 
-            // Add other methods for event handling, reproduction, etc.
-        }
+            findTarget() {
+                const dirRow = [-1, 0, 1];
+                const dirCol = [-1, 0, 1];
+                let targetRow, targetCol;
 
-        Cell.inheritGenes = function (parentA, parentB) {
-            const preferences = parentA.genes.preferences.map((pref, i) => (pref + parentB.genes.preferences[i]) / 2);
-            const newGenes = new Genes(
-                (colors.indexOf(parentA.color) + colors.indexOf(parentB.color)) / 2,
-                (parentA.genes.sight + parentB.genes.sight) / 2,
-                (parentA.genes.eventAwareness + parentB.genes.eventAwareness) / 2,
-                (parentA.genes.curiosity + parentB.genes.curiosity) / 2,
-                (parentA.genes.movementPattern + parentB.genes.movementPattern) / 2,
-                (parentA.genes.moveProbability + parentB.genes.moveProbability) / 2,
-                (parentA.genes.societyFormation + parentB.genes.societyFormation) / 2,
+                for (const dr of dirRow) {
+                    for (const dc of dirCol) {
+                        const row = (this.row + dr + rows) % rows;
+                        const col = (this.col + dc + cols) % cols;
+                        const other = grid[row][col];
+
+                        if (other && other !== this && other.color === this.color) {
+                            targetRow = row;
+                            targetCol = col;
+                            break;
+                        }
+                    }
+                }
+
+                return { targetRow, targetCol };
+            }
+
+            static inheritGenes(parentA, parentB) {
+              const preferences = parentA.genes.preferences.map((pref, index) => {
+                return (pref + parentB.genes.preferences[index]) / 2 + (Math.random() * geneMutationRange - geneMutationRange / 2);
+              });
+
+              const newGenes = new Genes(
+                (parentA.genes.colorIndex + parentB.genes.colorIndex) / 2 + (Math.random() * geneMutationRange - geneMutationRange / 2),
+                (parentA.genes.sight + parentB.genes.sight) / 2 + (Math.random() * geneMutationRange - geneMutationRange / 2),
+                (parentA.genes.eventAwareness + parentB.genes.eventAwareness) / 2 + (Math.random() * geneMutationRange - geneMutationRange / 2),
+                (parentA.genes.curiosity + parentB.genes.curiosity) / 2 + (Math.random() * geneMutationRange - geneMutationRange / 2),
+                (parentA.genes.movementPattern + parentB.genes.movementPattern) / 2 + (Math.random() * geneMutationRange - geneMutationRange / 2),
+                (parentA.genes.moveProbability + parentB.genes.moveProbability) / 2 + (Math.random() * geneMutationRange - geneMutationRange / 2),
+                (parentA.genes.societyFormation + parentB.genes.societyFormation) / 2 + (Math.random() * geneMutationRange - geneMutationRange / 2),
                 preferences
-                );
-                // Mutations
-  if (Math.random() < chanceToMutate) {
-      const geneToMutate = Math.floor(Math.random() * 8);
-      switch (geneToMutate) {
-          case 0:
-              newGenes.color = colors[Math.floor(Math.random() * colors.length)];
-              break;
-          case 1:
-              newGenes.sight += (Math.random() * 2 - 1) * geneMutationRange;
-              break;
-          case 2:
-              newGenes.eventAwareness += (Math.random() * 2 - 1) * geneMutationRange;
-              break;
-          case 3:
-              newGenes.curiosity += (Math.random() * 2 - 1) * geneMutationRange;
-              break;
-          case 4:
-              newGenes.movementPattern += (Math.random() * 2 - 1) * geneMutationRange;
-              break;
-          case 5:
-              newGenes.moveProbability += (Math.random() * 2 - 1) * geneMutationRange;
-              break;
-          case 6:
-              newGenes.societyFormation += (Math.random() * 2 - 1) * geneMutationRange;
-              break;
-          case 7:
-              const prefToMutate = Math.floor(Math.random() * preferences.length);
-              preferences[prefToMutate] += (Math.random() * 2 - 1) * geneMutationRange;
-              break;
-      }
-  }
-
-  return newGenes;
-};
+              );
+              return newGenes;
+            }
+        }
 
 // Event handling and reproduction
 function handleEvent() {
@@ -142,25 +131,22 @@ function handleEvent() {
 }
 
 function reproduce() {
-  for (const cell of organisms) {
-      if (Math.random() < 0.01) {
-          const newRow = cell.row + Math.floor(Math.random() * 3) - 1;
-          const newCol = cell.col + Math.floor(Math.random() * 3) - 1;
+ const newOrganisms = [];
 
-          if (newRow >= 0 && newRow < rows && newCol >= 0 && newCol < cols) {
-              if (!grid[newRow][newCol]) {
-                  const partner = organisms.find(o => o.row === newRow && o.col === newCol);
+ for (const cell of organisms) {
+     if (Math.random() < cell.genes.reproductionProbability) {
+         const { targetRow, targetCol } = cell.findTarget();
 
-                  if (partner) {
-                      const childGenes = Cell.inheritGenes(cell, partner);
-                      const child = new Cell(newRow, newCol, childGenes);
-                      organisms.push(child);
-                      grid[newRow][newCol] = child;
-                  }
-              }
-          }
+         if (targetRow !== undefined && targetCol !== undefined) {
+          const childGenes = mutate(cell.genes);
+          const child = new Cell(targetRow, targetCol, childGenes);
+          newOrganisms.push(child);
+          grid[targetRow][targetCol] = child;
       }
   }
+}
+
+organisms.push(...newOrganisms);
 }
 
 // Simulation loop
